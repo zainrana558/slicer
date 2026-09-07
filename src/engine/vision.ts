@@ -1,19 +1,27 @@
 /**
- * ML-based Vision module using Hugging Face Transformers
- * Runs entirely locally using ONNX Runtime (CPU or WASM)
+ * ML-based Vision module for Panel Detection
  * 
- * Uses semantic segmentation to identify panel boundaries
- * with human-level accuracy by understanding image content
+ * Supports two modes:
+ * 1. Trained YOLO model (recommended) - Custom trained for webtoon panels
+ * 2. Fallback CV model - Generic segmentation (less accurate)
+ * 
+ * The trained model must be placed in public/models/webtoon-panels.onnx
+ * See training/README.md for instructions
  */
 
 import { Panel, DetectionOptions, PanelType } from './types';
+import { 
+  loadTrainedModel, 
+  isTrainedModelLoaded, 
+  detectPanelsWithTrainedModel 
+} from './trainedModel';
 
-// Lazy-loaded pipeline
+// Legacy generic model (fallback only)
 let segmentationPipeline: any = null;
 let isLoading = false;
 let loadPromise: Promise<any> | null = null;
 
-const MODEL_ID = 'Xenova/segformer-b0-finetuned-ade-512-512';
+const FALLBACK_MODEL_ID = 'Xenova/segformer-b0-finetuned-ade-512-512';
 
 /**
  * Initialize the ML model (downloads on first use, cached after)
@@ -21,34 +29,65 @@ const MODEL_ID = 'Xenova/segformer-b0-finetuned-ade-512-512';
 export async function initializeVisionModel(
   onProgress?: (progress: number) => void
 ): Promise<void> {
+  // Check if trained model is already loaded
+  if (isTrainedModelLoaded()) {
+    console.log('✅ Trained YOLO model already loaded');
+    return;
+  }
+  
+  // Try to load trained model first
+  try {
+    onProgress?.(10);
+    await loadTrainedModel((progress) => {
+      onProgress?.(10 + progress * 0.8); // 10-90% for trained model
+    });
+    
+    if (isTrainedModelLoaded()) {
+      console.log('✅ Trained YOLO model loaded successfully');
+      onProgress?.(100);
+      return;
+    }
+  } catch (error) {
+    console.warn('⚠️ Trained model not available, loading fallback model:', error);
+  }
+  
+  // Fallback to generic segmentation model
   if (segmentationPipeline) return;
   if (loadPromise) return loadPromise;
   
   isLoading = true;
   loadPromise = (async () => {
-    const { pipeline, env } = await import('@huggingface/transformers');
-    
-    // Configure for local operation
-    env.allowLocalModels = false;
-    env.useBrowserCache = typeof window !== 'undefined';
-    
-    // Load the segmentation model
-    segmentationPipeline = await pipeline('image-segmentation', MODEL_ID, {
-      progress_callback: onProgress ? (data: any) => {
-        if (data.progress) {
-          onProgress(data.progress);
-        }
-      } : undefined,
-    });
-    
-    isLoading = false;
+    try {
+      onProgress?.(10);
+      const { pipeline, env } = await import('@huggingface/transformers');
+      
+      // Configure for local operation
+      env.allowLocalModels = false;
+      env.useBrowserCache = typeof window !== 'undefined';
+      
+      onProgress?.(30);
+      
+      // Load the segmentation model
+      segmentationPipeline = await pipeline('image-segmentation', FALLBACK_MODEL_ID, {
+        progress_callback: onProgress ? (data: any) => {
+          if (data.progress) {
+            onProgress(30 + data.progress * 0.7); // 30-100% for fallback model
+          }
+        } : undefined,
+      });
+      
+      console.log('✅ Fallback segmentation model loaded');
+      onProgress?.(100);
+    } finally {
+      isLoading = false;
+    }
   })();
   
   return loadPromise;
 }
 
 export function isModelLoaded(): boolean {
-  return segmentationPipeline !== null;
+  return isTrainedModelLoaded() || segmentationPipeline !== null;
 }
 
 export function isModelLoading(): boolean {
@@ -67,6 +106,20 @@ export async function detectPanelsML(
   imageData: ImageData,
   options: DetectionOptions
 ): Promise<Panel[]> {
+  // Try trained YOLO model first (best accuracy)
+  if (isTrainedModelLoaded()) {
+    try {
+      const panels = await detectPanelsWithTrainedModel(imageData, options);
+      if (panels.length > 0) {
+        console.log('✅ Using trained YOLO model for detection');
+        return panels;
+      }
+    } catch (error) {
+      console.warn('⚠️ Trained model failed, falling back to generic model:', error);
+    }
+  }
+  
+  // Fallback to generic segmentation model
   if (!segmentationPipeline) {
     await initializeVisionModel();
   }
