@@ -1,5 +1,5 @@
 /**
- * Core types for the Webtoon Panel Slicer engine
+ * Core types for the Advanced Webtoon Panel Slicer engine
  */
 
 export interface Rect {
@@ -15,6 +15,7 @@ export interface Panel extends Rect {
   type: PanelType;
   angle?: number; // For diagonal panels
   pageIndex?: number;
+  boundary?: Array<{ x: number; y: number }>; // For non-rectangular panels
 }
 
 export type PanelType = 
@@ -25,11 +26,16 @@ export type PanelType =
   | 'bleed'         // Panel extends to page edge
   | 'full-width'    // Panel spans full page width
   | 'split'         // Panel split vertically (common in manhwa)
-  | 'irregular';    // Non-rectangular panel
+  | 'irregular'     // Non-rectangular panel
+  | 'overlapping';  // Panels that overlap each other
+
+export type WebtoonType = 'manhwa' | 'manga' | 'manhua' | 'webtoon' | 'comic' | 'auto';
+
+export type DetectionStrategy = 'cv' | 'ml' | 'hybrid' | 'ensemble';
 
 export interface DetectionOptions {
   // Detection strategy
-  strategy: 'cv' | 'ml' | 'hybrid';
+  strategy: DetectionStrategy;
   
   // Sensitivity (0-100)
   gutterSensitivity: number;
@@ -52,9 +58,18 @@ export interface DetectionOptions {
   detectBorderless: boolean;
   detectInset: boolean;
   detectBleed: boolean;
+  detectOverlapping: boolean;
   
   // Webtoon-specific
-  webtoonType: 'manhwa' | 'manga' | 'manhua' | 'vertical' | 'auto';
+  webtoonType: WebtoonType;
+  
+  // Advanced options
+  useMultiScale: boolean;       // Multi-scale feature pyramid
+  useWatershed: boolean;        // Watershed segmentation
+  useSuperpixels: boolean;      // SLIC superpixels
+  useActiveContours: boolean;   // Snake refinement
+  useTextureAnalysis: boolean;  // LBP texture features
+  useMSER: boolean;             // Maximally Stable Extremal Regions
   
   // ML model options
   modelPath?: string;
@@ -63,6 +78,10 @@ export interface DetectionOptions {
   // Output options
   mergeThreshold: number; // 0-100
   splitThreshold: number; // 0-100
+  refineBoundaries: boolean;
+  
+  // Performance
+  maxProcessingTime?: number; // ms, optional timeout
 }
 
 export const DEFAULT_OPTIONS: DetectionOptions = {
@@ -81,10 +100,18 @@ export const DEFAULT_OPTIONS: DetectionOptions = {
   detectBorderless: true,
   detectInset: true,
   detectBleed: true,
+  detectOverlapping: true,
   webtoonType: 'auto',
+  useMultiScale: true,
+  useWatershed: true,
+  useSuperpixels: true,
+  useActiveContours: true,
+  useTextureAnalysis: true,
+  useMSER: true,
   useGPU: false,
   mergeThreshold: 15,
   splitThreshold: 20,
+  refineBoundaries: true,
 };
 
 export interface SliceResult {
@@ -98,6 +125,8 @@ export interface SliceResult {
     mlPanels: number;
     mergedPanels: number;
     protectedCuts: number;
+    techniquesUsed: string[];
+    confidenceAvg: number;
   };
 }
 

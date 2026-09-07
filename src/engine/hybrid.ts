@@ -107,11 +107,13 @@ async function hybridDetect(
   
   return {
     panels: fusedPanels,
-    metadata: {
+    meta {
       cvPanels: cvPanels.length,
       mlPanels: mlPanels.length,
       mergedPanels: fusedPanels.length,
       protectedCuts: 0,
+      techniquesUsed: ['cv', 'ml', 'fusion'],
+      confidenceAvg: fusedPanels.reduce((sum, p) => sum + p.confidence, 0) / Math.max(1, fusedPanels.length),
     },
   };
 }
