@@ -1,5 +1,15 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { detectPanels, initializeVisionModel, isModelLoaded, Panel, DetectionOptions, DEFAULT_OPTIONS, SliceResult } from './engine';
+import { 
+  detectPanels, 
+  detectPanelsIntelligent,
+  initializeVisionModel, 
+  isModelLoaded, 
+  Panel, 
+  DetectionOptions, 
+  DEFAULT_OPTIONS, 
+  SliceResult,
+  IntelligentResult 
+} from './engine';
 
 type AppState = 'upload' | 'processing' | 'results';
 
@@ -7,7 +17,7 @@ function App() {
   const [state, setState] = useState<AppState>('upload');
   const [imageUrl, setImageUrl] = useState<string>('');
   const [imageData, setImageData] = useState<ImageData | null>(null);
-  const [result, setResult] = useState<SliceResult | null>(null);
+  const [result, setResult] = useState<SliceResult | IntelligentResult | null>(null);
   const [selectedPanel, setSelectedPanel] = useState<number | null>(null);
   const [modelStatus, setModelStatus] = useState<'not-loaded' | 'loading' | 'loaded'>('not-loaded');
   const [loadProgress, setLoadProgress] = useState(0);
@@ -164,7 +174,15 @@ function App() {
         
         // Pass fastMode to options
         const detectionOptions = { ...options, fastMode };
-        const result = await detectPanels(imageData, detectionOptions);
+        
+        // Use intelligent engine if enabled
+        let result;
+        if (options.useIntelligentMode) {
+          setDetectionProgress('Running intelligent analysis...');
+          result = await detectPanelsIntelligent(imageData, detectionOptions);
+        } else {
+          result = await detectPanels(imageData, detectionOptions);
+        }
         
         setDetectionProgress('Finalizing results...');
         return result;
@@ -695,6 +713,122 @@ function App() {
                   </div>
                 )}
               </div>
+            )}
+
+            {/* Advanced Vision Engine Results */}
+            {'signature' in result && (
+              <>
+                {/* Processing Info */}
+                <div className="p-6 bg-gradient-to-br from-blue-500/10 to-cyan-500/10 rounded-xl border border-blue-500/30">
+                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    Processing Engine
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div className="p-3 bg-white/5 rounded-lg">
+                      <div className="text-sm text-gray-400 mb-1">Processing Path</div>
+                      <div className="text-lg font-bold text-cyan-400 capitalize">{result.processingPath.replace('-', ' ')}</div>
+                    </div>
+                    <div className="p-3 bg-white/5 rounded-lg">
+                      <div className="text-sm text-gray-400 mb-1">Complexity</div>
+                      <div className="text-lg font-bold text-blue-400 capitalize">{result.signature.estimatedComplexity}</div>
+                    </div>
+                    <div className="p-3 bg-white/5 rounded-lg">
+                      <div className="text-sm text-gray-400 mb-1">Optimizations</div>
+                      <div className="text-lg font-bold text-green-400">{result.optimizations.length} applied</div>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="text-sm font-semibold text-blue-400 mb-2">Optimizations Applied:</div>
+                    <div className="flex flex-wrap gap-2">
+                      {result.optimizations.map((opt, i) => (
+                        <span key={i} className="px-2 py-1 bg-blue-500/20 text-blue-300 text-xs rounded">
+                          {opt}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Image Signature */}
+                <div className="p-6 bg-white/5 rounded-xl border border-white/10">
+                  <h3 className="text-lg font-bold mb-4">Image Signature Analysis</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <div className="text-gray-400">Aspect Ratio</div>
+                      <div className="font-medium">{result.signature.aspectRatio.toFixed(2)}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400">Colorfulness</div>
+                      <div className="font-medium">{(result.signature.colorfulness * 100).toFixed(1)}%</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400">Clarity</div>
+                      <div className="font-medium">{(result.signature.clarity * 100).toFixed(1)}%</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400">Noise Level</div>
+                      <div className="font-medium">{(result.signature.noise * 100).toFixed(1)}%</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400">Has Text</div>
+                      <div className="font-medium">{result.signature.hasText ? '✓ Yes' : '✗ No'}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400">Has Faces</div>
+                      <div className="font-medium">{result.signature.hasFaces ? '✓ Yes' : '✗ No'}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400">Has Action</div>
+                      <div className="font-medium">{result.signature.hasAction ? '✓ Yes' : '✗ No'}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400">Has Bubbles</div>
+                      <div className="font-medium">{result.signature.hasBubbles ? '✓ Yes' : '✗ No'}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Panel Insights */}
+                {result.insights && result.insights.length > 0 && (
+                  <div className="p-6 bg-white/5 rounded-xl border border-white/10">
+                    <h3 className="text-lg font-bold mb-4">Panel Insights</h3>
+                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                      {result.insights.map((insight, i) => (
+                        <div key={i} className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-bold text-purple-400">#{i + 1}</span>
+                            <div>
+                              <div className="text-sm font-medium capitalize">{insight.contentType}</div>
+                              <div className="text-xs text-gray-400">
+                                Order: {insight.readingOrder + 1} | Type: {insight.type}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="text-right">
+                              <div className="text-xs text-gray-400">Importance</div>
+                              <div className="text-sm font-bold text-green-400">
+                                {(insight.importance * 100).toFixed(0)}%
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-xs text-gray-400">Confidence</div>
+                              <div className="text-sm font-bold text-blue-400">
+                                {(insight.confidence * 100).toFixed(0)}%
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
             {/* Image Characteristics */}
