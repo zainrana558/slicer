@@ -1114,16 +1114,16 @@ export function detectPanelsCV(imageData: ImageData, options: DetectionOptions):
     }
   }
   
-  // Step 4: Watershed detection (if enabled)
+  // Step 4: Watershed detection (if enabled, skip in fast mode)
   let watershedPanels: Panel[] = [];
-  if (options.useWatershed) {
+  if (options.useWatershed && !options.fastMode) {
     watershedPanels = detectPanelsWatershed(imageData, options);
     techniquesUsed.push('watershed');
   }
   
-  // Step 5: Superpixel detection (if enabled)
+  // Step 5: Superpixel detection (if enabled, skip in fast mode)
   let superpixelPanels: Panel[] = [];
-  if (options.useSuperpixels) {
+  if (options.useSuperpixels && !options.fastMode) {
     superpixelPanels = detectPanelsSuperpixels(imageData, options);
     techniquesUsed.push('superpixels');
   }
@@ -1135,16 +1135,16 @@ export function detectPanelsCV(imageData: ImageData, options: DetectionOptions):
     techniquesUsed.push('diagonal-ransac');
   }
   
-  // Step 7: Borderless panel detection (if enabled)
+  // Step 7: Borderless panel detection (if enabled, skip in fast mode)
   let borderlessPanels: Panel[] = [];
-  if (options.detectBorderless) {
+  if (options.detectBorderless && !options.fastMode) {
     borderlessPanels = detectBorderlessPanels(imageData, options);
     techniquesUsed.push('borderless-detection');
   }
   
-  // Step 8: Hierarchical detection (if enabled)
+  // Step 8: Hierarchical detection (if enabled, skip in fast mode)
   let hierarchicalPanels: Panel[] = [];
-  if (options.useHierarchical) {
+  if (options.useHierarchical && !options.fastMode) {
     hierarchicalPanels = detectHierarchicalPanels(imageData, options);
     techniquesUsed.push('hierarchical');
   }
@@ -1167,20 +1167,20 @@ export function detectPanelsCV(imageData: ImageData, options: DetectionOptions):
   allPanels = mergeOverlappingPanels(allPanels, options.mergeThreshold);
   techniquesUsed.push('merge-duplicates');
   
-  // Step 11: Graph-based boundary refinement
-  if (options.refineBoundaries) {
+  // Step 11: Graph-based boundary refinement (skip in fast mode)
+  if (options.refineBoundaries && !options.fastMode) {
     allPanels = refineBoundariesWithGraphCut(allPanels, imageData, options);
     techniquesUsed.push('graph-cut-refinement');
   }
   
-  // Step 12: Refine boundaries with active contours (if enabled)
-  if (options.useActiveContours && options.refineBoundaries) {
+  // Step 12: Refine boundaries with active contours (skip in fast mode)
+  if (options.useActiveContours && options.refineBoundaries && !options.fastMode) {
     allPanels = allPanels.map(panel => refinePanelBoundaries(panel, imageData));
     techniquesUsed.push('active-contours');
   }
   
-  // Step 13: Edge snapping for pixel-perfect boundaries
-  if (options.snapToEdges) {
+  // Step 13: Edge snapping for pixel-perfect boundaries (skip in fast mode)
+  if (options.snapToEdges && !options.fastMode) {
     allPanels = snapToStrongEdges(allPanels, imageData, options);
     techniquesUsed.push('edge-snapping');
   }

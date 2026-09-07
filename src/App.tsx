@@ -14,9 +14,38 @@ function App() {
   const [options, setOptions] = useState<DetectionOptions>(DEFAULT_OPTIONS);
   const [showSettings, setShowSettings] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [detectionProgress, setDetectionProgress] = useState<string>('');
+  const [fastMode, setFastMode] = useState(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Downscale image if too large
+  const downscaleImage = useCallback((imgData: ImageData, maxSize: number = 2000): ImageData => {
+    const { width, height } = imgData;
+    const maxDim = Math.max(width, height);
+    
+    if (maxDim <= maxSize) return imgData;
+    
+    const scale = maxSize / maxDim;
+    const newWidth = Math.round(width * scale);
+    const newHeight = Math.round(height * scale);
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = newWidth;
+    canvas.height = newHeight;
+    const ctx = canvas.getContext('2d')!;
+    
+    const srcCanvas = document.createElement('canvas');
+    srcCanvas.width = width;
+    srcCanvas.height = height;
+    const srcCtx = srcCanvas.getContext('2d')!;
+    srcCtx.putImageData(imgData, 0, 0);
+    
+    ctx.drawImage(srcCanvas, 0, 0, newWidth, newHeight);
+    
+    return ctx.getImageData(0, 0, newWidth, newHeight);
+  }, []);
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -32,44 +61,104 @@ function App() {
       canvas.height = img.naturalHeight;
       const ctx = canvas.getContext('2d')!;
       ctx.drawImage(img, 0, 0);
-      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      
+      // Auto-downscale if image is too large
+      const maxDim = Math.max(data.width, data.height);
+      if (maxDim > 2000) {
+        data = downscaleImage(data, 2000);
+        console.log(`Image downscaled from ${img.naturalWidth}x${img.naturalHeight} to ${data.width}x${data.height}`);
+      }
+      
       setImageData(data);
       setState('processing');
     };
     img.src = url;
-  }, []);
+  }, [downscaleImage]);
 
   const handleDetect = useCallback(async () => {
     if (!imageData || isDetecting) return;
 
     setIsDetecting(true);
+    setDetectionProgress('Starting detection...');
+
+    const startTime = Date.now();
+    const timeoutMs = fastMode ? 30000 : 60000; // 30s for fast mode, 60s for full
 
     try {
-      // Initialize ML model if needed
-      if ((options.strategy === 'ml' || options.strategy === 'hybrid') && !isModelLoaded()) {
-        setModelStatus('loading');
-        try {
-          await initializeVisionModel((progress) => {
-            setLoadProgress(progress);
-          });
-          setModelStatus('loaded');
-        } catch (error) {
-          console.error('Failed to load ML model:', error);
-          // Fall back to CV-only
-          setOptions(prev => ({ ...prev, strategy: 'cv' }));
-        }
-      }
+      // Create timeout promise
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Detection timeout - try using Fast Mode or CV-only strategy')), timeoutMs);
+      });
 
-      const result = await detectPanels(imageData, options);
+      // Create detection promise with progress updates
+      const detectionPromise = (async () => {
+        // Initialize ML model if needed
+        if ((options.strategy === 'ml' || options.strategy === 'hybrid') && !isModelLoaded()) {
+          setDetectionProgress('Loading ML model (this may take a moment on first use)...');
+          setModelStatus('loading');
+          
+          // Add timeout for model loading
+          const modelTimeout = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('ML model loading timeout - switch to CV-only strategy for faster results')), 15000);
+          });
+          
+          try {
+            await Promise.race([
+              initializeVisionModel((progress) => {
+                setLoadProgress(progress);
+                setDetectionProgress(`Loading ML model: ${progress.toFixed(0)}%`);
+              }),
+              modelTimeout
+            ]);
+            setModelStatus('loaded');
+          } catch (modelError) {
+            console.warn('ML model loading failed or timed out, falling back to CV-only:', modelError);
+            setOptions(prev => ({ ...prev, strategy: 'cv' }));
+            setDetectionProgress('ML model unavailable, using CV-only strategy...');
+          }
+        }
+
+        setDetectionProgress('Analyzing image structure...');
+        await new Promise(resolve => setTimeout(resolve, 100)); // Let UI update
+
+        setDetectionProgress('Detecting panels...');
+        
+        // Pass fastMode to options
+        const detectionOptions = { ...options, fastMode };
+        const result = await detectPanels(imageData, detectionOptions);
+        
+        setDetectionProgress('Finalizing results...');
+        return result;
+      })();
+
+      // Race detection against timeout
+      const result = await Promise.race([detectionPromise, timeoutPromise]);
+      
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`Detection completed in ${elapsed}s`);
+      
       setResult(result);
       setState('results');
+      setDetectionProgress('');
     } catch (error) {
       console.error('Error detecting panels:', error);
-      alert(`Error detecting panels: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Provide helpful suggestions based on error type
+      let suggestion = '';
+      if (errorMsg.includes('timeout')) {
+        suggestion = '\n\nSuggestions:\n- Enable Fast Mode for quicker results\n- Switch to CV-only strategy\n- Try a smaller image';
+      } else if (errorMsg.includes('ML model')) {
+        suggestion = '\n\nSuggestions:\n- Switch to CV-only strategy\n- Check your internet connection';
+      }
+      
+      alert(`Error detecting panels: ${errorMsg}${suggestion}`);
+      setDetectionProgress('');
     } finally {
       setIsDetecting(false);
     }
-  }, [imageData, options, isDetecting]);
+  }, [imageData, options, isDetecting, fastMode]);
 
   const handleExportPanel = useCallback(async (panel: Panel, index: number) => {
     if (!imageData) return;
@@ -406,23 +495,41 @@ function App() {
                 </div>
               )}
 
-              <button
-                onClick={handleDetect}
-                disabled={isDetecting}
-                className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-xl font-semibold text-lg shadow-lg shadow-purple-500/30 transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-              >
-                {isDetecting ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Detecting...
-                  </span>
-                ) : (
-                  'Detect Panels'
+              <div className="flex flex-col items-center gap-3">
+                <button
+                  onClick={handleDetect}
+                  disabled={isDetecting}
+                  className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-xl font-semibold text-lg shadow-lg shadow-purple-500/30 transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                >
+                  {isDetecting ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Detecting...
+                    </span>
+                  ) : (
+                    'Detect Panels'
+                  )}
+                </button>
+
+                <label className="flex items-center gap-2 text-sm text-gray-400">
+                  <input
+                    type="checkbox"
+                    checked={fastMode}
+                    onChange={(e) => setFastMode(e.target.checked)}
+                    className="rounded"
+                  />
+                  Fast Mode (skips ML, uses CV only)
+                </label>
+
+                {isDetecting && detectionProgress && (
+                  <div className="text-sm text-gray-400 text-center max-w-md">
+                    {detectionProgress}
+                  </div>
                 )}
-              </button>
+              </div>
             </div>
           </div>
         )}
