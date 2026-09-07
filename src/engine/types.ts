@@ -84,6 +84,7 @@ export interface DetectionOptions {
   
   // Performance
   maxProcessingTime?: number; // ms, optional timeout
+  fastMode?: boolean; // Skip expensive algorithms for faster results
 }
 
 export const DEFAULT_OPTIONS: DetectionOptions = {
@@ -116,6 +117,7 @@ export const DEFAULT_OPTIONS: DetectionOptions = {
   useGPU: false,
   mergeThreshold: 15,
   splitThreshold: 20,
+  fastMode: false,
 };
 
 export interface SliceResult {

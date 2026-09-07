@@ -13,53 +13,190 @@ function App() {
   const [loadProgress, setLoadProgress] = useState(0);
   const [options, setOptions] = useState<DetectionOptions>(DEFAULT_OPTIONS);
   const [showSettings, setShowSettings] = useState(false);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [detectionProgress, setDetectionProgress] = useState<string>('');
+  const [fastMode, setFastMode] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Downscale image if too large
+  const downscaleImage = useCallback((imgData: ImageData, maxSize: number = 2000): ImageData => {
+    const { width, height } = imgData;
+    const maxDim = Math.max(width, height);
+    
+    if (maxDim <= maxSize) return imgData;
+    
+    const scale = maxSize / maxDim;
+    const newWidth = Math.round(width * scale);
+    const newHeight = Math.round(height * scale);
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = newWidth;
+    canvas.height = newHeight;
+    const ctx = canvas.getContext('2d')!;
+    
+    const srcCanvas = document.createElement('canvas');
+    srcCanvas.width = width;
+    srcCanvas.height = height;
+    const srcCtx = srcCanvas.getContext('2d')!;
+    srcCtx.putImageData(imgData, 0, 0);
+    
+    ctx.drawImage(srcCanvas, 0, 0, newWidth, newHeight);
+    
+    return ctx.getImageData(0, 0, newWidth, newHeight);
+  }, []);
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const url = URL.createObjectURL(file);
-    setImageUrl(url);
+    setIsUploading(true);
 
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d')!;
-      ctx.drawImage(img, 0, 0);
-      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      setImageData(data);
-      setState('processing');
-    };
-    img.src = url;
-  }, []);
+    try {
+      // Create preview URL immediately for instant feedback
+      const previewUrl = URL.createObjectURL(file);
+      setImageUrl(previewUrl);
+
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(img, 0, 0);
+          let data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          
+          // Auto-downscale if image is too large
+          const maxDim = Math.max(data.width, data.height);
+          if (maxDim > 2000) {
+            console.log(`Downscaling image from ${img.naturalWidth}x${img.naturalHeight}...`);
+            data = downscaleImage(data, 2000);
+            console.log(`Image downscaled to ${data.width}x${data.height}`);
+            
+            // Create new preview URL from downscaled image
+            const previewCanvas = document.createElement('canvas');
+            previewCanvas.width = data.width;
+            previewCanvas.height = data.height;
+            const previewCtx = previewCanvas.getContext('2d')!;
+            previewCtx.putImageData(data, 0, 0);
+            
+            // Revoke old URL and create new one
+            URL.revokeObjectURL(previewUrl);
+            const newPreviewUrl = previewCanvas.toDataURL('image/jpeg', 0.9);
+            setImageUrl(newPreviewUrl);
+          }
+          
+          setImageData(data);
+          setIsUploading(false);
+          setState('processing');
+        } catch (error) {
+          console.error('Error processing image:', error);
+          alert('Error processing image. Please try a different image.');
+          setIsUploading(false);
+        }
+      };
+      
+      img.onerror = () => {
+        console.error('Failed to load image');
+        alert('Failed to load image. Please try a different file.');
+        URL.revokeObjectURL(previewUrl);
+        setIsUploading(false);
+      };
+      
+      img.src = previewUrl;
+    } catch (error) {
+      console.error('Error selecting file:', error);
+      alert('Error selecting file. Please try again.');
+      setIsUploading(false);
+    }
+  }, [downscaleImage]);
 
   const handleDetect = useCallback(async () => {
-    if (!imageData) return;
+    if (!imageData || isDetecting) return;
 
-    // Initialize ML model if needed
-    if ((options.strategy === 'ml' || options.strategy === 'hybrid') && !isModelLoaded()) {
-      setModelStatus('loading');
-      try {
-        await initializeVisionModel((progress) => {
-          setLoadProgress(progress);
-        });
-        setModelStatus('loaded');
-      } catch (error) {
-        console.error('Failed to load ML model:', error);
-        // Fall back to CV-only
-        setOptions(prev => ({ ...prev, strategy: 'cv' }));
+    setIsDetecting(true);
+    setDetectionProgress('Starting detection...');
+
+    const startTime = Date.now();
+    const timeoutMs = fastMode ? 30000 : 60000; // 30s for fast mode, 60s for full
+
+    try {
+      // Create timeout promise
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Detection timeout - try using Fast Mode or CV-only strategy')), timeoutMs);
+      });
+
+      // Create detection promise with progress updates
+      const detectionPromise = (async () => {
+        // Initialize ML model if needed
+        if ((options.strategy === 'ml' || options.strategy === 'hybrid') && !isModelLoaded()) {
+          setDetectionProgress('Loading ML model (this may take a moment on first use)...');
+          setModelStatus('loading');
+          
+          // Add timeout for model loading
+          const modelTimeout = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('ML model loading timeout - switch to CV-only strategy for faster results')), 15000);
+          });
+          
+          try {
+            await Promise.race([
+              initializeVisionModel((progress) => {
+                setLoadProgress(progress);
+                setDetectionProgress(`Loading ML model: ${progress.toFixed(0)}%`);
+              }),
+              modelTimeout
+            ]);
+            setModelStatus('loaded');
+          } catch (modelError) {
+            console.warn('ML model loading failed or timed out, falling back to CV-only:', modelError);
+            setOptions(prev => ({ ...prev, strategy: 'cv' }));
+            setDetectionProgress('ML model unavailable, using CV-only strategy...');
+          }
+        }
+
+        setDetectionProgress('Analyzing image structure...');
+        await new Promise(resolve => setTimeout(resolve, 100)); // Let UI update
+
+        setDetectionProgress('Detecting panels...');
+        
+        // Pass fastMode to options
+        const detectionOptions = { ...options, fastMode };
+        const result = await detectPanels(imageData, detectionOptions);
+        
+        setDetectionProgress('Finalizing results...');
+        return result;
+      })();
+
+      // Race detection against timeout
+      const result = await Promise.race([detectionPromise, timeoutPromise]);
+      
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`Detection completed in ${elapsed}s`);
+      
+      setResult(result);
+      setState('results');
+      setDetectionProgress('');
+    } catch (error) {
+      console.error('Error detecting panels:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Provide helpful suggestions based on error type
+      let suggestion = '';
+      if (errorMsg.includes('timeout')) {
+        suggestion = '\n\nSuggestions:\n- Enable Fast Mode for quicker results\n- Switch to CV-only strategy\n- Try a smaller image';
+      } else if (errorMsg.includes('ML model')) {
+        suggestion = '\n\nSuggestions:\n- Switch to CV-only strategy\n- Check your internet connection';
       }
+      
+      alert(`Error detecting panels: ${errorMsg}${suggestion}`);
+      setDetectionProgress('');
+    } finally {
+      setIsDetecting(false);
     }
-
-    const result = await detectPanels(imageData, options);
-    setResult(result);
-    setState('results');
-  }, [imageData, options]);
+  }, [imageData, options, isDetecting, fastMode]);
 
   const handleExportPanel = useCallback(async (panel: Panel, index: number) => {
     if (!imageData) return;
@@ -156,20 +293,55 @@ function App() {
               </p>
             </div>
 
+            {/* Show preview immediately if image is selected */}
+            {imageUrl && !isUploading && (
+              <div className="mb-6">
+                <img 
+                  src={imageUrl} 
+                  alt="Preview" 
+                  className="max-h-[40vh] rounded-xl shadow-2xl mx-auto"
+                  onError={(e) => {
+                    console.error('Preview failed to load');
+                  }}
+                />
+              </div>
+            )}
+
             <div
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full max-w-2xl p-12 border-2 border-dashed border-white/20 rounded-2xl hover:border-purple-500/50 hover:bg-white/5 transition-all cursor-pointer group"
+              onClick={() => !isUploading && fileInputRef.current?.click()}
+              className={`w-full max-w-2xl p-12 border-2 border-dashed rounded-2xl transition-all ${
+                isUploading 
+                  ? 'border-purple-500/50 bg-purple-500/5 cursor-wait' 
+                  : 'border-white/20 hover:border-purple-500/50 hover:bg-white/5 cursor-pointer'
+              } group`}
             >
               <div className="flex flex-col items-center gap-4">
-                <div className="w-16 h-16 bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <svg className="w-8 h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-medium mb-1">Drop your webtoon image here</p>
-                  <p className="text-sm text-gray-400">or click to browse (JPG, PNG, WEBP)</p>
-                </div>
+                {isUploading ? (
+                  <>
+                    <div className="w-16 h-16 bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-full flex items-center justify-center">
+                      <svg className="animate-spin h-8 w-8 text-purple-400" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-medium mb-1">Loading image...</p>
+                      <p className="text-sm text-gray-400">Preparing preview</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-16 h-16 bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <svg className="w-8 h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-medium mb-1">Drop your webtoon image here</p>
+                      <p className="text-sm text-gray-400">or click to browse (JPG, PNG, WEBP)</p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -229,7 +401,16 @@ function App() {
         {state === 'processing' && imageUrl && (
           <div className="flex flex-col items-center gap-6">
             <div className="relative">
-              <img src={imageUrl} alt="Preview" className="max-h-[60vh] rounded-xl shadow-2xl" />
+              <img 
+                src={imageUrl} 
+                alt="Preview" 
+                className="max-h-[60vh] rounded-xl shadow-2xl"
+                onLoad={() => console.log('Preview image loaded successfully')}
+                onError={(e) => {
+                  console.error('Preview image failed to load:', e);
+                  alert('Preview image failed to load. Please try uploading again.');
+                }}
+              />
             </div>
 
             <div className="flex flex-col items-center gap-4">
@@ -396,12 +577,41 @@ function App() {
                 </div>
               )}
 
-              <button
-                onClick={handleDetect}
-                className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-xl font-semibold text-lg shadow-lg shadow-purple-500/30 transition-all hover:scale-105"
-              >
-                Detect Panels
-              </button>
+              <div className="flex flex-col items-center gap-3">
+                <button
+                  onClick={handleDetect}
+                  disabled={isDetecting}
+                  className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-xl font-semibold text-lg shadow-lg shadow-purple-500/30 transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                >
+                  {isDetecting ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Detecting...
+                    </span>
+                  ) : (
+                    'Detect Panels'
+                  )}
+                </button>
+
+                <label className="flex items-center gap-2 text-sm text-gray-400">
+                  <input
+                    type="checkbox"
+                    checked={fastMode}
+                    onChange={(e) => setFastMode(e.target.checked)}
+                    className="rounded"
+                  />
+                  Fast Mode (skips ML, uses CV only)
+                </label>
+
+                {isDetecting && detectionProgress && (
+                  <div className="text-sm text-gray-400 text-center max-w-md">
+                    {detectionProgress}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
