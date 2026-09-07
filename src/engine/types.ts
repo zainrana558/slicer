@@ -77,6 +77,16 @@ export interface DetectionOptions {
   // Intelligent mode
   useIntelligentMode: boolean;  // Enable adaptive tuning and content analysis
   
+  // Advanced techniques
+  useAdvancedTechniques?: boolean;  // Enable TTA, Soft NMS, etc.
+  advancedTechniques?: {
+    useTTA?: boolean;           // Test Time Augmentation
+    useSoftNMS?: boolean;       // Soft Non-Maximum Suppression
+    useMultiScale?: boolean;    // Multi-scale detection
+    useAttention?: boolean;     // Attention-guided refinement
+    useEnsemble?: boolean;      // Ensemble multiple models
+  };
+  
   // ML model options
   modelPath?: string;
   useGPU: boolean;
@@ -118,6 +128,14 @@ export const DEFAULT_OPTIONS: DetectionOptions = {
   refineBoundaries: true,
   snapToEdges: true,
   useIntelligentMode: true,
+  useAdvancedTechniques: false,
+  advancedTechniques: {
+    useTTA: false,
+    useSoftNMS: true,
+    useMultiScale: false,
+    useAttention: false,
+    useEnsemble: false,
+  },
   useGPU: false,
   mergeThreshold: 15,
   splitThreshold: 20,

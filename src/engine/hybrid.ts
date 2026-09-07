@@ -24,6 +24,14 @@ import {
   PanelContent,
   DetectionQuality
 } from './intelligent';
+import { 
+  advancedDetection, 
+  softNMS, 
+  applyTTA, 
+  ensembleDetections, 
+  multiScaleDetection, 
+  attentionRefinement 
+} from './advancedTechniques';
 
 export { initializeVisionModel, isModelLoaded };
 
@@ -71,6 +79,22 @@ export async function detectPanels(
   
   // Final post-processing
   panels = postProcessPanels(panels, imageData, adaptiveOptions);
+  
+  // Step 2.5: Apply advanced techniques (if enabled)
+  if (adaptiveOptions.useAdvancedTechniques) {
+    const advancedOptions = adaptiveOptions.advancedTechniques || {};
+    
+    panels = await advancedDetection(
+      imageData,
+      async (img) => detectPanelsCV(img, adaptiveOptions),
+      {
+        useTTA: advancedOptions.useTTA,
+        useSoftNMS: advancedOptions.useSoftNMS,
+        useMultiScale: advancedOptions.useMultiScale,
+        useAttention: advancedOptions.useAttention,
+      }
+    );
+  }
   
   // Step 3: Classify panel content types (if intelligent mode)
   let panelContents: PanelContent[] | undefined;

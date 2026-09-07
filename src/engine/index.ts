@@ -24,9 +24,11 @@ export * from './intelligent';
 export * from './advancedVision';
 export * from './intelligentEngine';
 export * from './trainedModel';
+export * from './advancedTechniques';
 
 // Convenience re-exports
 export { detectPanels, exportPanelAsBlob, initializeVisionModel, isModelLoaded } from './hybrid';
 export { detectPanelsIntelligent } from './intelligentEngine';
 export type { IntelligentResult } from './intelligentEngine';
 export { loadTrainedModel, isTrainedModelLoaded, detectPanelsWithTrainedModel } from './trainedModel';
+export { advancedDetection, softNMS, applyTTA, ensembleDetections, multiScaleDetection, attentionRefinement } from './advancedTechniques';
