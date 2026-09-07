@@ -23,8 +23,10 @@ export * from './hybrid';
 export * from './intelligent';
 export * from './advancedVision';
 export * from './intelligentEngine';
+export * from './trainedModel';
 
 // Convenience re-exports
 export { detectPanels, exportPanelAsBlob, initializeVisionModel, isModelLoaded } from './hybrid';
 export { detectPanelsIntelligent } from './intelligentEngine';
 export type { IntelligentResult } from './intelligentEngine';
+export { loadTrainedModel, isTrainedModelLoaded, detectPanelsWithTrainedModel } from './trainedModel';
