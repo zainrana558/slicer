@@ -16,6 +16,7 @@ function App() {
   const [isDetecting, setIsDetecting] = useState(false);
   const [detectionProgress, setDetectionProgress] = useState<string>('');
   const [fastMode, setFastMode] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -51,29 +52,66 @@ function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const url = URL.createObjectURL(file);
-    setImageUrl(url);
+    setIsUploading(true);
 
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d')!;
-      ctx.drawImage(img, 0, 0);
-      let data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    try {
+      // Create preview URL immediately for instant feedback
+      const previewUrl = URL.createObjectURL(file);
+      setImageUrl(previewUrl);
+
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(img, 0, 0);
+          let data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          
+          // Auto-downscale if image is too large
+          const maxDim = Math.max(data.width, data.height);
+          if (maxDim > 2000) {
+            console.log(`Downscaling image from ${img.naturalWidth}x${img.naturalHeight}...`);
+            data = downscaleImage(data, 2000);
+            console.log(`Image downscaled to ${data.width}x${data.height}`);
+            
+            // Create new preview URL from downscaled image
+            const previewCanvas = document.createElement('canvas');
+            previewCanvas.width = data.width;
+            previewCanvas.height = data.height;
+            const previewCtx = previewCanvas.getContext('2d')!;
+            previewCtx.putImageData(data, 0, 0);
+            
+            // Revoke old URL and create new one
+            URL.revokeObjectURL(previewUrl);
+            const newPreviewUrl = previewCanvas.toDataURL('image/jpeg', 0.9);
+            setImageUrl(newPreviewUrl);
+          }
+          
+          setImageData(data);
+          setIsUploading(false);
+          setState('processing');
+        } catch (error) {
+          console.error('Error processing image:', error);
+          alert('Error processing image. Please try a different image.');
+          setIsUploading(false);
+        }
+      };
       
-      // Auto-downscale if image is too large
-      const maxDim = Math.max(data.width, data.height);
-      if (maxDim > 2000) {
-        data = downscaleImage(data, 2000);
-        console.log(`Image downscaled from ${img.naturalWidth}x${img.naturalHeight} to ${data.width}x${data.height}`);
-      }
+      img.onerror = () => {
+        console.error('Failed to load image');
+        alert('Failed to load image. Please try a different file.');
+        URL.revokeObjectURL(previewUrl);
+        setIsUploading(false);
+      };
       
-      setImageData(data);
-      setState('processing');
-    };
-    img.src = url;
+      img.src = previewUrl;
+    } catch (error) {
+      console.error('Error selecting file:', error);
+      alert('Error selecting file. Please try again.');
+      setIsUploading(false);
+    }
   }, [downscaleImage]);
 
   const handleDetect = useCallback(async () => {
@@ -255,20 +293,55 @@ function App() {
               </p>
             </div>
 
+            {/* Show preview immediately if image is selected */}
+            {imageUrl && !isUploading && (
+              <div className="mb-6">
+                <img 
+                  src={imageUrl} 
+                  alt="Preview" 
+                  className="max-h-[40vh] rounded-xl shadow-2xl mx-auto"
+                  onError={(e) => {
+                    console.error('Preview failed to load');
+                  }}
+                />
+              </div>
+            )}
+
             <div
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full max-w-2xl p-12 border-2 border-dashed border-white/20 rounded-2xl hover:border-purple-500/50 hover:bg-white/5 transition-all cursor-pointer group"
+              onClick={() => !isUploading && fileInputRef.current?.click()}
+              className={`w-full max-w-2xl p-12 border-2 border-dashed rounded-2xl transition-all ${
+                isUploading 
+                  ? 'border-purple-500/50 bg-purple-500/5 cursor-wait' 
+                  : 'border-white/20 hover:border-purple-500/50 hover:bg-white/5 cursor-pointer'
+              } group`}
             >
               <div className="flex flex-col items-center gap-4">
-                <div className="w-16 h-16 bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <svg className="w-8 h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-medium mb-1">Drop your webtoon image here</p>
-                  <p className="text-sm text-gray-400">or click to browse (JPG, PNG, WEBP)</p>
-                </div>
+                {isUploading ? (
+                  <>
+                    <div className="w-16 h-16 bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-full flex items-center justify-center">
+                      <svg className="animate-spin h-8 w-8 text-purple-400" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-medium mb-1">Loading image...</p>
+                      <p className="text-sm text-gray-400">Preparing preview</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-16 h-16 bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <svg className="w-8 h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-medium mb-1">Drop your webtoon image here</p>
+                      <p className="text-sm text-gray-400">or click to browse (JPG, PNG, WEBP)</p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -328,7 +401,16 @@ function App() {
         {state === 'processing' && imageUrl && (
           <div className="flex flex-col items-center gap-6">
             <div className="relative">
-              <img src={imageUrl} alt="Preview" className="max-h-[60vh] rounded-xl shadow-2xl" />
+              <img 
+                src={imageUrl} 
+                alt="Preview" 
+                className="max-h-[60vh] rounded-xl shadow-2xl"
+                onLoad={() => console.log('Preview image loaded successfully')}
+                onError={(e) => {
+                  console.error('Preview image failed to load:', e);
+                  alert('Preview image failed to load. Please try uploading again.');
+                }}
+              />
             </div>
 
             <div className="flex flex-col items-center gap-4">
