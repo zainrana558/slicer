@@ -1159,9 +1159,13 @@ export function detectPanelsCV(imageData: ImageData, options: DetectionOptions):
     ...hierarchicalPanels,
   ];
   
-  // Step 10: Merge overlapping panels
+  // Step 10: Detect and handle overlapping panels
+  allPanels = detectOverlappingPanels(allPanels, options);
+  techniquesUsed.push('overlap-detection');
+  
+  // Step 11: Merge duplicate panels (but keep overlapping ones separate)
   allPanels = mergeOverlappingPanels(allPanels, options.mergeThreshold);
-  techniquesUsed.push('merge-overlapping');
+  techniquesUsed.push('merge-duplicates');
   
   // Step 11: Graph-based boundary refinement
   if (options.refineBoundaries) {
@@ -1211,37 +1215,183 @@ function classifyPanelType(
   return 'standard';
 }
 
-function mergeOverlappingPanels(panels: Panel[], threshold: number): Panel[] {
-  if (panels.length === 0) return [];
+// ============ Overlapping Panel Detection ============
+
+function detectOverlappingPanels(panels: Panel[], options: DetectionOptions): Panel[] {
+  if (!options.detectOverlapping || panels.length < 2) {
+    return panels;
+  }
   
-  const merged: Panel[] = [];
-  const used = new Set<number>();
+  const result: Panel[] = [];
+  const processed = new Set<number>();
   
-  for (let i = 0; i < panels.length; i++) {
-    if (used.has(i)) continue;
+  // Sort by area (largest first)
+  const sorted = [...panels].sort((a, b) => 
+    (b.width * b.height) - (a.width * a.height)
+  );
+  
+  for (let i = 0; i < sorted.length; i++) {
+    if (processed.has(i)) continue;
     
-    let current = { ...panels[i] };
-    used.add(i);
+    const current = sorted[i];
+    processed.add(i);
     
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (let j = 0; j < panels.length; j++) {
-        if (used.has(j)) continue;
-        
-        const overlap = computeIoU(current, panels[j]);
-        if (overlap > threshold / 100) {
-          current = mergeRects(current, panels[j]);
-          used.add(j);
-          changed = true;
-        }
+    // Check if this panel contains any smaller panels
+    const containedPanels: Panel[] = [];
+    
+    for (let j = i + 1; j < sorted.length; j++) {
+      if (processed.has(j)) continue;
+      
+      const other = sorted[j];
+      const overlapInfo = analyzeOverlap(current, other);
+      
+      // If the smaller panel is mostly inside the larger one
+      if (overlapInfo.type === 'contained' && overlapInfo.containmentRatio > 0.5) {
+        // Mark the smaller panel as 'overlapping'
+        containedPanels.push({
+          ...other,
+          type: 'overlapping',
+          confidence: other.confidence * 0.95,
+        });
+        processed.add(j);
       }
     }
     
-    merged.push(current);
+    // Add the current panel
+    result.push(current);
+    
+    // Add any contained panels
+    result.push(...containedPanels);
   }
   
-  return merged;
+  return result;
+}
+
+function mergeOverlappingPanels(panels: Panel[], threshold: number): Panel[] {
+  if (panels.length === 0) return [];
+  
+  // Sort by area (largest first) to handle containment properly
+  const sorted = [...panels].sort((a, b) => 
+    (b.width * b.height) - (a.width * a.height)
+  );
+  
+  const result: Panel[] = [];
+  const used = new Set<number>();
+  
+  for (let i = 0; i < sorted.length; i++) {
+    if (used.has(i)) continue;
+    
+    const current = sorted[i];
+    used.add(i);
+    
+    // Check if this panel contains or is contained by other panels
+    let hasOverlap = false;
+    
+    for (let j = 0; j < sorted.length; j++) {
+      if (i === j || used.has(j)) continue;
+      
+      const other = sorted[j];
+      const overlapInfo = analyzeOverlap(current, other);
+      
+      // Case 1: One panel is mostly inside another (inset/overlay case)
+      if (overlapInfo.type === 'contained') {
+        // Keep both panels separate - mark the smaller one as 'inset' or 'overlapping'
+        const smaller = overlapInfo.smallerArea ? other : current;
+        const larger = overlapInfo.smallerArea ? current : other;
+        
+        // Mark the smaller panel appropriately
+        if (smaller === other) {
+          sorted[j] = {
+            ...other,
+            type: 'overlapping',
+            confidence: other.confidence * 0.9,
+          };
+        } else {
+          sorted[i] = {
+            ...current,
+            type: 'overlapping',
+            confidence: current.confidence * 0.9,
+          };
+        }
+        
+        hasOverlap = true;
+      }
+      // Case 2: Panels are very similar (true duplicates) - merge them
+      else if (overlapInfo.type === 'duplicate') {
+        // Only merge if they're truly duplicates (similar size and position)
+        const sizeRatio = Math.min(
+          (current.width * current.height) / (other.width * other.height),
+          (other.width * other.height) / (current.width * current.height)
+        );
+        
+        if (sizeRatio > 0.7) {
+          // Similar size - likely duplicates, merge them
+          sorted[i] = mergeRects(current, other);
+          used.add(j);
+        }
+        // Otherwise keep separate (different sizes = different panels)
+      }
+      // Case 3: Partial overlap - keep separate but adjust boundaries
+      else if (overlapInfo.type === 'partial') {
+        // Don't merge, but could adjust boundaries if needed
+        hasOverlap = true;
+      }
+    }
+    
+    // Add to result if not merged
+    if (!used.has(i)) {
+      result.push(sorted[i]);
+    }
+  }
+  
+  return result;
+}
+
+interface OverlapInfo {
+  type: 'contained' | 'duplicate' | 'partial' | 'none';
+  iou: number;
+  containmentRatio: number;
+  smallerArea: boolean;
+}
+
+function analyzeOverlap(a: Rect, b: Rect): OverlapInfo {
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.width, b.x + b.width);
+  const y2 = Math.min(a.y + a.height, b.y + b.height);
+  
+  if (x2 <= x1 || y2 <= y1) {
+    return { type: 'none', iou: 0, containmentRatio: 0, smallerArea: false };
+  }
+  
+  const intersection = (x2 - x1) * (y2 - y1);
+  const areaA = a.width * a.height;
+  const areaB = b.width * b.height;
+  const union = areaA + areaB - intersection;
+  const iou = union > 0 ? intersection / union : 0;
+  
+  // Containment ratio: how much of the smaller panel is inside the larger one
+  const smallerArea = areaA < areaB;
+  const smallerPanelArea = smallerArea ? areaA : areaB;
+  const containmentRatio = intersection / smallerPanelArea;
+  
+  // Case 1: One panel is mostly inside another (>70% containment)
+  if (containmentRatio > 0.7) {
+    return { type: 'contained', iou, containmentRatio, smallerArea };
+  }
+  
+  // Case 2: Very similar panels (high IoU and similar size)
+  const sizeRatio = Math.min(areaA / areaB, areaB / areaA);
+  if (iou > 0.5 && sizeRatio > 0.7) {
+    return { type: 'duplicate', iou, containmentRatio, smallerArea };
+  }
+  
+  // Case 3: Partial overlap
+  if (iou > 0.1) {
+    return { type: 'partial', iou, containmentRatio, smallerArea };
+  }
+  
+  return { type: 'none', iou, containmentRatio, smallerArea };
 }
 
 function computeIoU(a: Rect, b: Rect): number {
