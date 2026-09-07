@@ -1,0 +1,6 @@
+interface:
+  display_name: "Slicer"
+  short_description: "Repo-specific patterns and workflows for slicer"
+  default_prompt: "Use the slicer repo skill to follow existing architecture, testing, and workflow conventions."
+policy:
+  allow_implicit_invocation: true
