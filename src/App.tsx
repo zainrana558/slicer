@@ -13,6 +13,7 @@ function App() {
   const [loadProgress, setLoadProgress] = useState(0);
   const [options, setOptions] = useState<DetectionOptions>(DEFAULT_OPTIONS);
   const [showSettings, setShowSettings] = useState(false);
+  const [isDetecting, setIsDetecting] = useState(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -39,27 +40,36 @@ function App() {
   }, []);
 
   const handleDetect = useCallback(async () => {
-    if (!imageData) return;
+    if (!imageData || isDetecting) return;
 
-    // Initialize ML model if needed
-    if ((options.strategy === 'ml' || options.strategy === 'hybrid') && !isModelLoaded()) {
-      setModelStatus('loading');
-      try {
-        await initializeVisionModel((progress) => {
-          setLoadProgress(progress);
-        });
-        setModelStatus('loaded');
-      } catch (error) {
-        console.error('Failed to load ML model:', error);
-        // Fall back to CV-only
-        setOptions(prev => ({ ...prev, strategy: 'cv' }));
+    setIsDetecting(true);
+
+    try {
+      // Initialize ML model if needed
+      if ((options.strategy === 'ml' || options.strategy === 'hybrid') && !isModelLoaded()) {
+        setModelStatus('loading');
+        try {
+          await initializeVisionModel((progress) => {
+            setLoadProgress(progress);
+          });
+          setModelStatus('loaded');
+        } catch (error) {
+          console.error('Failed to load ML model:', error);
+          // Fall back to CV-only
+          setOptions(prev => ({ ...prev, strategy: 'cv' }));
+        }
       }
-    }
 
-    const result = await detectPanels(imageData, options);
-    setResult(result);
-    setState('results');
-  }, [imageData, options]);
+      const result = await detectPanels(imageData, options);
+      setResult(result);
+      setState('results');
+    } catch (error) {
+      console.error('Error detecting panels:', error);
+      alert(`Error detecting panels: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsDetecting(false);
+    }
+  }, [imageData, options, isDetecting]);
 
   const handleExportPanel = useCallback(async (panel: Panel, index: number) => {
     if (!imageData) return;
@@ -398,9 +408,20 @@ function App() {
 
               <button
                 onClick={handleDetect}
-                className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-xl font-semibold text-lg shadow-lg shadow-purple-500/30 transition-all hover:scale-105"
+                disabled={isDetecting}
+                className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-xl font-semibold text-lg shadow-lg shadow-purple-500/30 transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
               >
-                Detect Panels
+                {isDetecting ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Detecting...
+                  </span>
+                ) : (
+                  'Detect Panels'
+                )}
               </button>
             </div>
           </div>
