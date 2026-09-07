@@ -71,6 +71,8 @@ interface HybridResult {
     mlPanels: number;
     mergedPanels: number;
     protectedCuts: number;
+    techniquesUsed: string[];
+    confidenceAvg: number;
   };
 }
 
@@ -107,7 +109,7 @@ async function hybridDetect(
   
   return {
     panels: fusedPanels,
-    meta {
+    metadata: {
       cvPanels: cvPanels.length,
       mlPanels: mlPanels.length,
       mergedPanels: fusedPanels.length,

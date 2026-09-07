@@ -70,6 +70,9 @@ export interface DetectionOptions {
   useActiveContours: boolean;   // Snake refinement
   useTextureAnalysis: boolean;  // LBP texture features
   useMSER: boolean;             // Maximally Stable Extremal Regions
+  useHierarchical: boolean;     // Hierarchical panel detection
+  refineBoundaries: boolean;    // Refine boundaries with graph cut/active contours
+  snapToEdges: boolean;         // Snap panel boundaries to strong edges
   
   // ML model options
   modelPath?: string;
@@ -78,7 +81,6 @@ export interface DetectionOptions {
   // Output options
   mergeThreshold: number; // 0-100
   splitThreshold: number; // 0-100
-  refineBoundaries: boolean;
   
   // Performance
   maxProcessingTime?: number; // ms, optional timeout
@@ -108,10 +110,12 @@ export const DEFAULT_OPTIONS: DetectionOptions = {
   useActiveContours: true,
   useTextureAnalysis: true,
   useMSER: true,
+  useHierarchical: true,
+  refineBoundaries: true,
+  snapToEdges: true,
   useGPU: false,
   mergeThreshold: 15,
   splitThreshold: 20,
-  refineBoundaries: true,
 };
 
 export interface SliceResult {

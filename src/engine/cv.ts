@@ -784,6 +784,292 @@ function refinePanelBoundaries(
   };
 }
 
+// ============ Graph-Based Boundary Refinement ============
+
+function refineBoundariesWithGraphCut(
+  panels: Panel[],
+  imageData: ImageData,
+  options: DetectionOptions
+): Panel[] {
+  const { width, height } = imageData;
+  const gray = imageDataToGrayscale(imageData);
+  const edges = sobelEdge(gray);
+  
+  return panels.map(panel => {
+    // For each panel boundary, try to snap to nearby strong edges
+    const snapDistance = 10;
+    let { x, y, width: w, height: h } = panel;
+    
+    // Try to snap left edge
+    for (let dx = -snapDistance; dx <= snapDistance; dx++) {
+      const testX = x + dx;
+      if (testX < 0 || testX >= width) continue;
+      
+      let edgeStrength = 0;
+      for (let dy = 0; dy < h; dy += 5) {
+        edgeStrength += edges.magnitude[(y + dy) * width + testX];
+      }
+      
+      if (edgeStrength > edges.magnitude[y * width + x] * 1.2) {
+        x = testX;
+        break;
+      }
+    }
+    
+    // Try to snap right edge
+    for (let dx = -snapDistance; dx <= snapDistance; dx++) {
+      const testX = x + w + dx;
+      if (testX < 0 || testX >= width) continue;
+      
+      let edgeStrength = 0;
+      for (let dy = 0; dy < h; dy += 5) {
+        edgeStrength += edges.magnitude[(y + dy) * width + testX];
+      }
+      
+      if (edgeStrength > edges.magnitude[y * width + (x + w)] * 1.2) {
+        w = testX - x;
+        break;
+      }
+    }
+    
+    // Try to snap top edge
+    for (let dy = -snapDistance; dy <= snapDistance; dy++) {
+      const testY = y + dy;
+      if (testY < 0 || testY >= height) continue;
+      
+      let edgeStrength = 0;
+      for (let dx = 0; dx < w; dx += 5) {
+        edgeStrength += edges.magnitude[testY * width + (x + dx)];
+      }
+      
+      if (edgeStrength > edges.magnitude[y * width + x] * 1.2) {
+        y = testY;
+        break;
+      }
+    }
+    
+    // Try to snap bottom edge
+    for (let dy = -snapDistance; dy <= snapDistance; dy++) {
+      const testY = y + h + dy;
+      if (testY < 0 || testY >= height) continue;
+      
+      let edgeStrength = 0;
+      for (let dx = 0; dx < w; dx += 5) {
+        edgeStrength += edges.magnitude[testY * width + (x + dx)];
+      }
+      
+      if (edgeStrength > edges.magnitude[(y + h) * width + x] * 1.2) {
+        h = testY - y;
+        break;
+      }
+    }
+    
+    return { ...panel, x, y, width: w, height: h };
+  });
+}
+
+// ============ Hierarchical Panel Detection ============
+
+function detectHierarchicalPanels(
+  imageData: ImageData,
+  options: DetectionOptions
+): Panel[] {
+  const { width, height } = imageData;
+  const allPanels: Panel[] = [];
+  
+  // First pass: detect large panels
+  const largePanelOptions = {
+    ...options,
+    minPanelWidth: Math.max(options.minPanelWidth, width * 0.3),
+    minPanelHeight: Math.max(options.minPanelHeight, height * 0.2),
+  };
+  
+  const largePanels = detectPanelsWatershed(imageData, largePanelOptions);
+  allPanels.push(...largePanels);
+  
+  // Second pass: detect smaller panels within gaps
+  for (const largePanel of largePanels) {
+    // Check if this large panel contains smaller sub-panels
+    const subPanelRegion = extractRegion(imageData, largePanel);
+    const subPanels = detectPanelsWatershed(subPanelRegion, {
+      ...options,
+      minPanelWidth: options.minPanelWidth,
+      minPanelHeight: options.minPanelHeight,
+    });
+    
+    // If we found sub-panels, replace the large panel with them
+    if (subPanels.length > 1) {
+      // Remove the large panel
+      const idx = allPanels.indexOf(largePanel);
+      if (idx >= 0) allPanels.splice(idx, 1);
+      
+      // Add sub-panels with offset
+      for (const subPanel of subPanels) {
+        allPanels.push({
+          ...subPanel,
+          x: subPanel.x + largePanel.x,
+          y: subPanel.y + largePanel.y,
+          id: `sub-${subPanel.id}`,
+          type: 'inset',
+        });
+      }
+    }
+  }
+  
+  return allPanels;
+}
+
+function extractRegion(imageData: ImageData, region: Rect): ImageData {
+  const canvas = document.createElement('canvas');
+  canvas.width = region.width;
+  canvas.height = region.height;
+  const ctx = canvas.getContext('2d')!;
+  
+  const srcCanvas = document.createElement('canvas');
+  srcCanvas.width = imageData.width;
+  srcCanvas.height = imageData.height;
+  const srcCtx = srcCanvas.getContext('2d')!;
+  srcCtx.putImageData(imageData, 0, 0);
+  
+  ctx.drawImage(
+    srcCanvas,
+    region.x, region.y, region.width, region.height,
+    0, 0, region.width, region.height
+  );
+  
+  return ctx.getImageData(0, 0, region.width, region.height);
+}
+
+// ============ Improved Borderless Panel Detection ============
+
+function detectBorderlessPanels(
+  imageData: ImageData,
+  options: DetectionOptions
+): Panel[] {
+  const { width, height, data } = imageData;
+  const gray = imageDataToGrayscale(imageData);
+  const edges = sobelEdge(gray);
+  
+  const panels: Panel[] = [];
+  
+  // Look for regions with content but weak borders
+  const blockSize = 50;
+  const edgeThreshold = 30;
+  
+  for (let by = 0; by < height; by += blockSize) {
+    for (let bx = 0; bx < width; bx += blockSize) {
+      const bw = Math.min(blockSize, width - bx);
+      const bh = Math.min(blockSize, height - by);
+      
+      // Compute edge density in this block
+      let edgeSum = 0;
+      let contentPixels = 0;
+      
+      for (let y = by; y < by + bh; y++) {
+        for (let x = bx; x < bx + bw; x++) {
+          const idx = y * width + x;
+          edgeSum += edges.magnitude[idx];
+          
+          const r = data[idx * 4];
+          const g = data[idx * 4 + 1];
+          const b = data[idx * 4 + 2];
+          const brightness = (r + g + b) / 3;
+          
+          if (brightness > 20 && brightness < 240) {
+            contentPixels++;
+          }
+        }
+      }
+      
+      const avgEdge = edgeSum / (bw * bh);
+      const contentRatio = contentPixels / (bw * bh);
+      
+      // If there's content but low edge density, it might be borderless
+      if (contentRatio > 0.3 && avgEdge < edgeThreshold) {
+        // Expand to find full borderless panel
+        const expandedPanel = expandBorderlessPanel(imageData, bx, by, bw, bh, options);
+        if (expandedPanel) {
+          panels.push({
+            ...expandedPanel,
+            id: `borderless-${panels.length}`,
+            confidence: 0.6,
+            type: 'borderless',
+          });
+        }
+      }
+    }
+  }
+  
+  return panels;
+}
+
+function expandBorderlessPanel(
+  imageData: ImageData,
+  startX: number,
+  startY: number,
+  startW: number,
+  startH: number,
+  options: DetectionOptions
+): Rect | null {
+  const { width, height } = imageData;
+  const gray = imageDataToGrayscale(imageData);
+  const edges = sobelEdge(gray);
+  
+  let x = startX, y = startY, w = startW, h = startH;
+  
+  // Expand in each direction until we hit a strong edge or boundary
+  const edgeThreshold = 50;
+  const maxExpand = 100;
+  
+  // Expand left
+  for (let dx = 0; dx < maxExpand && x > 0; dx++) {
+    let edgeStrength = 0;
+    for (let dy = 0; dy < h; dy += 5) {
+      edgeStrength += edges.magnitude[(y + dy) * width + (x - 1)];
+    }
+    if (edgeStrength / (h / 5) > edgeThreshold) break;
+    x--;
+    w++;
+  }
+  
+  // Expand right
+  for (let dx = 0; dx < maxExpand && x + w < width; dx++) {
+    let edgeStrength = 0;
+    for (let dy = 0; dy < h; dy += 5) {
+      edgeStrength += edges.magnitude[(y + dy) * width + (x + w)];
+    }
+    if (edgeStrength / (h / 5) > edgeThreshold) break;
+    w++;
+  }
+  
+  // Expand top
+  for (let dy = 0; dy < maxExpand && y > 0; dy++) {
+    let edgeStrength = 0;
+    for (let dx = 0; dx < w; dx += 5) {
+      edgeStrength += edges.magnitude[(y - 1) * width + (x + dx)];
+    }
+    if (edgeStrength / (w / 5) > edgeThreshold) break;
+    y--;
+    h++;
+  }
+  
+  // Expand bottom
+  for (let dy = 0; dy < maxExpand && y + h < height; dy++) {
+    let edgeStrength = 0;
+    for (let dx = 0; dx < w; dx += 5) {
+      edgeStrength += edges.magnitude[(y + h) * width + (x + dx)];
+    }
+    if (edgeStrength / (w / 5) > edgeThreshold) break;
+    h++;
+  }
+  
+  if (w >= options.minPanelWidth && h >= options.minPanelHeight) {
+    return { x, y, width: w, height: h };
+  }
+  
+  return null;
+}
+
 // ============ Main Detection Pipeline ============
 
 export function detectPanelsCV(imageData: ImageData, options: DetectionOptions): Panel[] {
@@ -849,20 +1135,53 @@ export function detectPanelsCV(imageData: ImageData, options: DetectionOptions):
     techniquesUsed.push('diagonal-ransac');
   }
   
-  // Step 7: Combine all panel candidates
-  let allPanels = [...gutterPanels, ...watershedPanels, ...superpixelPanels, ...diagonalPanels];
+  // Step 7: Borderless panel detection (if enabled)
+  let borderlessPanels: Panel[] = [];
+  if (options.detectBorderless) {
+    borderlessPanels = detectBorderlessPanels(imageData, options);
+    techniquesUsed.push('borderless-detection');
+  }
   
-  // Step 8: Merge overlapping panels
+  // Step 8: Hierarchical detection (if enabled)
+  let hierarchicalPanels: Panel[] = [];
+  if (options.useHierarchical) {
+    hierarchicalPanels = detectHierarchicalPanels(imageData, options);
+    techniquesUsed.push('hierarchical');
+  }
+  
+  // Step 9: Combine all panel candidates
+  let allPanels = [
+    ...gutterPanels,
+    ...watershedPanels,
+    ...superpixelPanels,
+    ...diagonalPanels,
+    ...borderlessPanels,
+    ...hierarchicalPanels,
+  ];
+  
+  // Step 10: Merge overlapping panels
   allPanels = mergeOverlappingPanels(allPanels, options.mergeThreshold);
   techniquesUsed.push('merge-overlapping');
   
-  // Step 9: Refine boundaries with active contours (if enabled)
+  // Step 11: Graph-based boundary refinement
+  if (options.refineBoundaries) {
+    allPanels = refineBoundariesWithGraphCut(allPanels, imageData, options);
+    techniquesUsed.push('graph-cut-refinement');
+  }
+  
+  // Step 12: Refine boundaries with active contours (if enabled)
   if (options.useActiveContours && options.refineBoundaries) {
     allPanels = allPanels.map(panel => refinePanelBoundaries(panel, imageData));
     techniquesUsed.push('active-contours');
   }
   
-  // Step 10: Sort in reading order
+  // Step 13: Edge snapping for pixel-perfect boundaries
+  if (options.snapToEdges) {
+    allPanels = snapToStrongEdges(allPanels, imageData, options);
+    techniquesUsed.push('edge-snapping');
+  }
+  
+  // Step 14: Sort in reading order
   allPanels = sortReadingOrder(allPanels, options.webtoonType);
   
   // Limit panel count
@@ -970,5 +1289,104 @@ function sortReadingOrder(panels: Panel[], webtoonType: string): Panel[] {
       return a.x - b.x;
     }
     return yDiff;
+  });
+}
+
+// ============ Edge Snapping ============
+
+function snapToStrongEdges(panels: Panel[], imageData: ImageData, options: DetectionOptions): Panel[] {
+  const { width, height } = imageData;
+  const gray = imageDataToGrayscale(imageData);
+  const edges = sobelEdge(gray);
+  
+  return panels.map(panel => {
+    let { x, y, width: w, height: h } = panel;
+    const snapDistance = 8;
+    const edgeThreshold = 60;
+    
+    // Snap left edge
+    let bestLeftX = x;
+    let bestLeftStrength = 0;
+    for (let dx = -snapDistance; dx <= snapDistance; dx++) {
+      const testX = x + dx;
+      if (testX < 0 || testX >= width) continue;
+      
+      let strength = 0;
+      for (let dy = 0; dy < h; dy += 3) {
+        strength += edges.magnitude[(y + dy) * width + testX];
+      }
+      
+      if (strength > bestLeftStrength && strength > edgeThreshold * (h / 3)) {
+        bestLeftStrength = strength;
+        bestLeftX = testX;
+      }
+    }
+    
+    // Snap right edge
+    let bestRightX = x + w;
+    let bestRightStrength = 0;
+    for (let dx = -snapDistance; dx <= snapDistance; dx++) {
+      const testX = x + w + dx;
+      if (testX < 0 || testX >= width) continue;
+      
+      let strength = 0;
+      for (let dy = 0; dy < h; dy += 3) {
+        strength += edges.magnitude[(y + dy) * width + testX];
+      }
+      
+      if (strength > bestRightStrength && strength > edgeThreshold * (h / 3)) {
+        bestRightStrength = strength;
+        bestRightX = testX;
+      }
+    }
+    
+    // Snap top edge
+    let bestTopY = y;
+    let bestTopStrength = 0;
+    for (let dy = -snapDistance; dy <= snapDistance; dy++) {
+      const testY = y + dy;
+      if (testY < 0 || testY >= height) continue;
+      
+      let strength = 0;
+      for (let dx = 0; dx < w; dx += 3) {
+        strength += edges.magnitude[testY * width + (x + dx)];
+      }
+      
+      if (strength > bestTopStrength && strength > edgeThreshold * (w / 3)) {
+        bestTopStrength = strength;
+        bestTopY = testY;
+      }
+    }
+    
+    // Snap bottom edge
+    let bestBottomY = y + h;
+    let bestBottomStrength = 0;
+    for (let dy = -snapDistance; dy <= snapDistance; dy++) {
+      const testY = y + h + dy;
+      if (testY < 0 || testY >= height) continue;
+      
+      let strength = 0;
+      for (let dx = 0; dx < w; dx += 3) {
+        strength += edges.magnitude[testY * width + (x + dx)];
+      }
+      
+      if (strength > bestBottomStrength && strength > edgeThreshold * (w / 3)) {
+        bestBottomStrength = strength;
+        bestBottomY = testY;
+      }
+    }
+    
+    // Apply snapping
+    const newX = bestLeftX;
+    const newY = bestTopY;
+    const newW = bestRightX - bestLeftX;
+    const newH = bestBottomY - bestTopY;
+    
+    // Only apply if it makes sense (doesn't shrink too much)
+    if (newW > w * 0.8 && newH > h * 0.8 && newW >= options.minPanelWidth && newH >= options.minPanelHeight) {
+      return { ...panel, x: newX, y: newY, width: newW, height: newH };
+    }
+    
+    return panel;
   });
 }

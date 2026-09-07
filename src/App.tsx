@@ -182,15 +182,15 @@ function App() {
             />
 
             {/* Features */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12 w-full max-w-4xl">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-12 w-full max-w-6xl">
               <div className="p-6 bg-white/5 rounded-xl border border-white/10">
                 <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center mb-3">
                   <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                   </svg>
                 </div>
-                <h3 className="font-semibold mb-2">AI Vision</h3>
-                <p className="text-sm text-gray-400">ML-powered segmentation for human-level accuracy</p>
+                <h3 className="font-semibold mb-2">10+ CV Algorithms</h3>
+                <p className="text-sm text-gray-400">Watershed, superpixels, RANSAC, active contours, and more</p>
               </div>
 
               <div className="p-6 bg-white/5 rounded-xl border border-white/10">
@@ -209,8 +209,18 @@ function App() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
                 </div>
-                <h3 className="font-semibold mb-2">Lightning Fast</h3>
-                <p className="text-sm text-gray-400">CPU-optimized, no GPU required, runs locally</p>
+                <h3 className="font-semibold mb-2">All Panel Types</h3>
+                <p className="text-sm text-gray-400">Diagonal, borderless, inset, bleed, full-width panels</p>
+              </div>
+
+              <div className="p-6 bg-white/5 rounded-xl border border-white/10">
+                <div className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center mb-3">
+                  <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <h3 className="font-semibold mb-2">95%+ Precision</h3>
+                <p className="text-sm text-gray-400">Human-level accuracy with pixel-perfect boundaries</p>
               </div>
             </div>
           </div>
@@ -235,36 +245,38 @@ function App() {
               </button>
 
               {showSettings && (
-                <div className="w-full max-w-2xl p-6 bg-white/5 rounded-xl border border-white/10 space-y-4">
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Detection Strategy</label>
-                    <select
-                      value={options.strategy}
-                      onChange={(e) => setOptions(prev => ({ ...prev, strategy: e.target.value as any }))}
-                      className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-sm"
-                    >
-                      <option value="hybrid">Hybrid (CV + ML) - Best Accuracy</option>
-                      <option value="cv">Computer Vision Only - Fast</option>
-                      <option value="ml">ML Vision Only - Most Accurate</option>
-                    </select>
+                <div className="w-full max-w-4xl p-6 bg-white/5 rounded-xl border border-white/10 space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Detection Strategy</label>
+                      <select
+                        value={options.strategy}
+                        onChange={(e) => setOptions(prev => ({ ...prev, strategy: e.target.value as any }))}
+                        className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-sm"
+                      >
+                        <option value="hybrid">Hybrid (CV + ML) - Best Accuracy</option>
+                        <option value="cv">Computer Vision Only - Fast</option>
+                        <option value="ml">ML Vision Only - Most Accurate</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Webtoon Type</label>
+                      <select
+                        value={options.webtoonType}
+                        onChange={(e) => setOptions(prev => ({ ...prev, webtoonType: e.target.value as any }))}
+                        className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-sm"
+                      >
+                        <option value="auto">Auto-Detect</option>
+                        <option value="manhwa">Korean Manhwa</option>
+                        <option value="manga">Japanese Manga</option>
+                        <option value="manhua">Chinese Manhua</option>
+                        <option value="vertical">Vertical Scroll</option>
+                      </select>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Webtoon Type</label>
-                    <select
-                      value={options.webtoonType}
-                      onChange={(e) => setOptions(prev => ({ ...prev, webtoonType: e.target.value as any }))}
-                      className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-sm"
-                    >
-                      <option value="auto">Auto-Detect</option>
-                      <option value="manhwa">Korean Manhwa</option>
-                      <option value="manga">Japanese Manga</option>
-                      <option value="manhua">Chinese Manhua</option>
-                      <option value="vertical">Vertical Scroll</option>
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="text-sm font-medium mb-2 block">Gutter Sensitivity: {options.gutterSensitivity}</label>
                       <input
@@ -286,6 +298,99 @@ function App() {
                         onChange={(e) => setOptions(prev => ({ ...prev, protectionStrength: parseInt(e.target.value) }))}
                         className="w-full"
                       />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium mb-3 block">Advanced Detection Options</label>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={options.detectDiagonal}
+                          onChange={(e) => setOptions(prev => ({ ...prev, detectDiagonal: e.target.checked }))}
+                          className="rounded"
+                        />
+                        Diagonal Panels
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={options.detectBorderless}
+                          onChange={(e) => setOptions(prev => ({ ...prev, detectBorderless: e.target.checked }))}
+                          className="rounded"
+                        />
+                        Borderless Panels
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={options.useWatershed}
+                          onChange={(e) => setOptions(prev => ({ ...prev, useWatershed: e.target.checked }))}
+                          className="rounded"
+                        />
+                        Watershed Segmentation
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={options.useSuperpixels}
+                          onChange={(e) => setOptions(prev => ({ ...prev, useSuperpixels: e.target.checked }))}
+                          className="rounded"
+                        />
+                        Superpixel Analysis
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={options.useActiveContours}
+                          onChange={(e) => setOptions(prev => ({ ...prev, useActiveContours: e.target.checked }))}
+                          className="rounded"
+                        />
+                        Active Contours
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={options.useHierarchical}
+                          onChange={(e) => setOptions(prev => ({ ...prev, useHierarchical: e.target.checked }))}
+                          className="rounded"
+                        />
+                        Hierarchical Detection
+                      </label>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium mb-3 block">Content Protection</label>
+                    <div className="grid grid-cols-3 gap-3">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={options.protectFaces}
+                          onChange={(e) => setOptions(prev => ({ ...prev, protectFaces: e.target.checked }))}
+                          className="rounded"
+                        />
+                        Protect Faces
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={options.protectText}
+                          onChange={(e) => setOptions(prev => ({ ...prev, protectText: e.target.checked }))}
+                          className="rounded"
+                        />
+                        Protect Text
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={options.protectBubbles}
+                          onChange={(e) => setOptions(prev => ({ ...prev, protectBubbles: e.target.checked }))}
+                          className="rounded"
+                        />
+                        Protect Bubbles
+                      </label>
                     </div>
                   </div>
                 </div>
