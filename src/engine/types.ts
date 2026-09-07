@@ -74,6 +74,9 @@ export interface DetectionOptions {
   refineBoundaries: boolean;    // Refine boundaries with graph cut/active contours
   snapToEdges: boolean;         // Snap panel boundaries to strong edges
   
+  // Intelligent mode
+  useIntelligentMode: boolean;  // Enable adaptive tuning and content analysis
+  
   // ML model options
   modelPath?: string;
   useGPU: boolean;
@@ -114,6 +117,7 @@ export const DEFAULT_OPTIONS: DetectionOptions = {
   useHierarchical: true,
   refineBoundaries: true,
   snapToEdges: true,
+  useIntelligentMode: true,
   useGPU: false,
   mergeThreshold: 15,
   splitThreshold: 20,
@@ -127,12 +131,15 @@ export interface SliceResult {
   imageWidth: number;
   imageHeight: number;
   metadata?: {
-    cvPanels: number;
-    mlPanels: number;
-    mergedPanels: number;
-    protectedCuts: number;
-    techniquesUsed: string[];
-    confidenceAvg: number;
+    cvPanels?: number;
+    mlPanels?: number;
+    mergedPanels?: number;
+    protectedCuts?: number;
+    techniquesUsed?: string[];
+    confidenceAvg?: number;
+    characteristics?: any;
+    panelContents?: any[];
+    quality?: any;
   };
 }
 

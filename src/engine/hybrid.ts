@@ -3,15 +3,27 @@
  * Combines CV-based detection with ML vision for human-level accuracy
  * 
  * Strategy:
- * 1. Run CV detection (fast, good for structured panels)
- * 2. Run ML detection (slower, understands content)
- * 3. Fuse results: use ML to validate/correct CV results
- * 4. Apply content protection to prevent cutting through faces/text
+ * 1. Analyze image characteristics for adaptive tuning
+ * 2. Run CV detection (fast, good for structured panels)
+ * 3. Run ML detection (slower, understands content)
+ * 4. Fuse results: use ML to validate/correct CV results
+ * 5. Apply content protection to prevent cutting through faces/text
+ * 6. Classify panel content types
+ * 7. Score detection quality
  */
 
 import { Panel, DetectionOptions, SliceResult } from './types';
 import { detectPanelsCV } from './cv';
 import { detectPanelsML, initializeVisionModel, isModelLoaded } from './vision';
+import { 
+  analyzeImageCharacteristics, 
+  getAdaptiveOptions, 
+  classifyPanelContent, 
+  scoreDetectionQuality,
+  ImageCharacteristics,
+  PanelContent,
+  DetectionQuality
+} from './intelligent';
 
 export { initializeVisionModel, isModelLoaded };
 
@@ -25,24 +37,32 @@ export async function detectPanels(
   const startTime = performance.now();
   const { width, height } = imageData;
   
+  // Step 1: Analyze image characteristics for intelligent tuning
+  const characteristics = analyzeImageCharacteristics(imageData);
+  
+  // Step 2: Get adaptive options based on image analysis
+  const adaptiveOptions = options.useIntelligentMode 
+    ? getAdaptiveOptions(options, characteristics)
+    : options;
+  
   let panels: Panel[] = [];
   let metadata: SliceResult['metadata'] = undefined;
-  let strategy = options.strategy;
+  let strategy = adaptiveOptions.strategy;
   
-  switch (options.strategy) {
+  switch (adaptiveOptions.strategy) {
     case 'cv':
-      panels = detectPanelsCV(imageData, options);
+      panels = detectPanelsCV(imageData, adaptiveOptions);
       strategy = 'cv';
       break;
       
     case 'ml':
-      panels = await detectPanelsML(imageData, options);
+      panels = await detectPanelsML(imageData, adaptiveOptions);
       strategy = 'ml';
       break;
       
     case 'hybrid':
     default:
-      const result = await hybridDetect(imageData, options);
+      const result = await hybridDetect(imageData, adaptiveOptions);
       panels = result.panels;
       metadata = result.metadata;
       strategy = 'hybrid';
@@ -50,7 +70,19 @@ export async function detectPanels(
   }
   
   // Final post-processing
-  panels = postProcessPanels(panels, imageData, options);
+  panels = postProcessPanels(panels, imageData, adaptiveOptions);
+  
+  // Step 3: Classify panel content types (if intelligent mode)
+  let panelContents: PanelContent[] | undefined;
+  if (options.useIntelligentMode) {
+    panelContents = panels.map(panel => classifyPanelContent(panel, imageData));
+  }
+  
+  // Step 4: Score detection quality (if intelligent mode)
+  let quality: DetectionQuality | undefined;
+  if (options.useIntelligentMode) {
+    quality = scoreDetectionQuality(panels, imageData, characteristics);
+  }
   
   const processingTime = performance.now() - startTime;
   
@@ -60,7 +92,16 @@ export async function detectPanels(
     strategy,
     imageWidth: width,
     imageHeight: height,
-    metadata,
+    metadata: metadata ? {
+      ...metadata,
+      characteristics,
+      panelContents,
+      quality,
+    } : {
+      characteristics,
+      panelContents,
+      quality,
+    } as any,
   };
 }
 

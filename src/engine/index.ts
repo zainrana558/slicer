@@ -11,12 +11,16 @@
  * - Detects diagonal, borderless, inset, and bleed panels
  * - Runs locally without GPU (CPU/WASM optimized)
  * - Pipeline-friendly API
+ * - Intelligent adaptive parameter tuning
+ * - Panel content classification
+ * - Quality scoring and optimization
  */
 
 export * from './types';
 export * from './cv';
 export * from './vision';
 export * from './hybrid';
+export * from './intelligent';
 
 // Convenience re-exports
 export { detectPanels, exportPanelAsBlob, initializeVisionModel, isModelLoaded } from './hybrid';
